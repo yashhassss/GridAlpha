@@ -1,7 +1,17 @@
+import os
+from dotenv import load_dotenv
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, create_engine
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
-DATABASE_URL = "postgresql://postgres:niros@localhost:5432/aipower"
+# Load the hidden variables from the .env file
+load_dotenv()
+
+# Pull the entire connection string securely
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+# Make sure it doesn't try to connect if the URL is missing
+if not DATABASE_URL:
+    raise ValueError("No DATABASE_URL found in environment variables!")
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

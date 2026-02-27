@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+numpy
+reportlab
+python-dotenv
+sqlalchemy
+psycopg2-binary
