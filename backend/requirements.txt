@@ -4,5 +4,6 @@ numpy
 reportlab
 python-dotenv
 sqlalchemy
+requests
 psycopg2-binary
 slowapi
