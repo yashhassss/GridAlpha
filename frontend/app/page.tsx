@@ -14,24 +14,40 @@ export default function Home() {
   const [data, setData] = useState<any[]>([]);
   const [extraMW, setExtraMW] = useState<number>(0);
   const [targetCompany, setTargetCompany] = useState<string>("Microsoft");
-  const [hardware, setHardware] = useState<string>("H100"); 
-  const [targetYear, setTargetYear] = useState<string>("2030"); 
+  const [hardware, setHardware] = useState<string>("H100");
+  const [targetYear, setTargetYear] = useState<string>("2030");
   const [optimizeData, setOptimizeData] = useState<any>(null);
   const [isOptimizing, setIsOptimizing] = useState<boolean>(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
-  
+
+  // NEW: State for global loading (Cold Start)
+  const [isBooting, setIsBooting] = useState<boolean>(true);
+
   // NEW: State to control map panning from the ledger
   const [focusLocation, setFocusLocation] = useState<string | null>(null);
 
   const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
   useEffect(() => {
-    fetch(`${API_BASE}/api/power-alpha`)
-      .then((res) => res.json())
-      .then((json) => formatChartData(json.data))
-      .catch((err) => console.error("API Error:", err));
+    const fetchWithRetry = () => {
+      fetch(`${API_BASE}/api/power-alpha`)
+        .then((res) => {
+          if (!res.ok) throw new Error("Backend unavailable");
+          return res.json();
+        })
+        .then((json) => {
+          formatChartData(json.data);
+          setIsBooting(false);
+        })
+        .catch((err) => {
+          console.warn("Backend still booting. Retrying in 5 seconds...");
+          setTimeout(fetchWithRetry, 5000); // Retry every 5 seconds
+        });
+    };
+
+    fetchWithRetry();
   }, []);
 
   const formatChartData = (rawData: any[]) => {
@@ -48,7 +64,7 @@ export default function Home() {
     setExtraMW(val);
     setTargetCompany(company);
     setHardware(hwType);
-    setOptimizeData(null); 
+    setOptimizeData(null);
     setFocusLocation(null); // Reset focus on new simulation
 
     const endpoint = val === 0 ? "/api/power-alpha" : "/api/simulate";
@@ -56,9 +72,9 @@ export default function Home() {
     const body = val === 0 ? null : JSON.stringify({ target_company: company, extra_mw: val, hardware_type: hwType });
 
     const res = await fetch(`${API_BASE}${endpoint}`, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body
+      method,
+      headers: { "Content-Type": "application/json" },
+      body
     });
     const json = await res.json();
     formatChartData(json.data);
@@ -79,16 +95,16 @@ export default function Home() {
     setIsOptimizing(false);
   };
 
-  const downloadFile = async (endpoint:string, filename:string) => {
+  const downloadFile = async (endpoint: string, filename: string) => {
     const res = await fetch(`${API_BASE}${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target_company: targetCompany, extra_mw: extraMW, hardware_type: hardware }),
-      });
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = filename;
-      document.body.appendChild(a); a.click(); a.remove();
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target_company: targetCompany, extra_mw: extraMW, hardware_type: hardware }),
+    });
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
   }
 
   const uniqueCompanies = Array.from(new Set(data.map(item => item.company)));
@@ -96,21 +112,21 @@ export default function Home() {
   const totalArbitrage = optimizeData?.daily_savings_vs_worst || 0;
 
   // Dynamic Grid Status Calculation
- // Dynamic Grid Status Calculation (Network Health)
+  // Dynamic Grid Status Calculation (Network Health)
   const networkNodes = data.filter(d => d.company === targetCompany);
   const nodeCount = networkNodes.length || 1;
-  
+
   const criticalNodes = networkNodes.filter(d => (d.risks_by_year?.[targetYear] || 0) > 50).length;
   const elevatedNodes = networkNodes.filter(d => (d.risks_by_year?.[targetYear] || 0) > 20).length;
-  
+
   const criticalPercent = (criticalNodes / nodeCount) * 100;
   const elevatedPercent = (elevatedNodes / nodeCount) * 100;
-  
+
   let gridStatus = "STABLE";
   if (criticalPercent >= 15) {
-      gridStatus = "CRITICAL"; // 15% or more of the network is crashing
+    gridStatus = "CRITICAL"; // 15% or more of the network is crashing
   } else if (criticalPercent >= 5 || elevatedPercent >= 20) {
-      gridStatus = "ELEVATED"; // A notable chunk is under stress
+    gridStatus = "ELEVATED"; // A notable chunk is under stress
   }
   const handleGenerateTearSheet = async () => {
     setIsGeneratingPdf(true);
@@ -130,7 +146,7 @@ export default function Home() {
       // Convert the response to a Blob and create a temporary URL
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
-      
+
       setPdfUrl(url);
       setIsPdfModalOpen(true);
     } catch (error) {
@@ -145,57 +161,67 @@ export default function Home() {
       <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-blue-900/10 blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] bg-orange-900/5 blur-[120px] rounded-full pointer-events-none" />
 
+      {isBooting && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mb-4"></div>
+          <h2 className="text-xl font-bold tracking-widest text-orange-400">CONNECTING TO GRID INFRASTRUCTURE</h2>
+          <p className="text-sm text-gray-400 mt-2 max-w-sm text-center">
+            Initializing neural link to global power endpoints. This may take up to 60 seconds during a cold boot sequence...
+          </p>
+        </div>
+      )}
+
       <motion.div className="max-w-[1800px] mx-auto h-full relative z-10 flex flex-col gap-3" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-        
+
         <div className="flex-none">
-          <Header 
-      downloadReport={() => downloadFile("/api/export", `Grid_Stress_${targetCompany}.csv`)}
-      downloadPDF={handleGenerateTearSheet} 
-      totalArbitrage={totalArbitrage}
-      gridStatus={gridStatus}
-      isOptimizing={isOptimizing}
-  />
+          <Header
+            downloadReport={() => downloadFile("/api/export", `Grid_Stress_${targetCompany}.csv`)}
+            downloadPDF={handleGenerateTearSheet}
+            totalArbitrage={totalArbitrage}
+            gridStatus={gridStatus}
+            isOptimizing={isOptimizing}
+          />
         </div>
 
         <div className="flex-none">
-          <ControlCockpit 
-              extraMW={extraMW} setExtraMW={(val) => runSimulation(val, targetCompany, hardware)}
-              targetCompany={targetCompany} setTargetCompany={(val) => runSimulation(extraMW, val, hardware)}
-              hardware={hardware} handleHardwareChange={(val) => runSimulation(extraMW, targetCompany, val)}
-              targetYear={targetYear} setTargetYear={setTargetYear}
-              runOptimization={runOptimization} isOptimizing={isOptimizing} uniqueCompanies={uniqueCompanies}
+          <ControlCockpit
+            extraMW={extraMW} setExtraMW={(val) => runSimulation(val, targetCompany, hardware)}
+            targetCompany={targetCompany} setTargetCompany={(val) => runSimulation(extraMW, val, hardware)}
+            hardware={hardware} handleHardwareChange={(val) => runSimulation(extraMW, targetCompany, val)}
+            targetYear={targetYear} setTargetYear={setTargetYear}
+            runOptimization={runOptimization} isOptimizing={isOptimizing} uniqueCompanies={uniqueCompanies}
           />
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-1 min-h-0 overflow-hidden">
-            <div className="lg:col-span-3 h-full min-h-0">
-               <GridStatusPanel data={data} targetYear={targetYear} targetCompany={targetCompany} />
-            </div>
+          <div className="lg:col-span-3 h-full min-h-0">
+            <GridStatusPanel data={data} targetYear={targetYear} targetCompany={targetCompany} />
+          </div>
 
-            <div className="lg:col-span-6 h-full flex flex-col gap-3 min-h-0 overflow-hidden">
-                <div className="flex-1 min-h-0">
-                   {/* MAP RECEIVES focusLocation */}
-                   <GlobalMap data={data} optimizeData={optimizeData} targetCompany={targetCompany} targetYear={targetYear} focusLocation={focusLocation} />
-                </div>
-                <div className="flex-1 min-h-0">
-                   <ChartsSection data={data} targetAsset={targetAsset} targetCompany={targetCompany} />
-                </div>
+          <div className="lg:col-span-6 h-full flex flex-col gap-3 min-h-0 overflow-hidden">
+            <div className="flex-1 min-h-0">
+              {/* MAP RECEIVES focusLocation */}
+              <GlobalMap data={data} optimizeData={optimizeData} targetCompany={targetCompany} targetYear={targetYear} focusLocation={focusLocation} />
             </div>
+            <div className="flex-1 min-h-0">
+              <ChartsSection data={data} targetAsset={targetAsset} targetCompany={targetCompany} />
+            </div>
+          </div>
 
-            <div className="lg:col-span-3 h-full min-h-0">
-               {/* LEDGER SENDS setFocusLocation */}
-               <ArbitrageLedger optimizeData={optimizeData} onLocationClick={setFocusLocation} />
-            </div>
+          <div className="lg:col-span-3 h-full min-h-0">
+            {/* LEDGER SENDS setFocusLocation */}
+            <ArbitrageLedger optimizeData={optimizeData} onLocationClick={setFocusLocation} />
+          </div>
         </div>
 
         <div className="flex-none">
           <LiveLedgerTable data={data} />
         </div>
-<PdfPreviewModal 
-          isOpen={isPdfModalOpen} 
-          onClose={() => setIsPdfModalOpen(false)} 
-          pdfUrl={pdfUrl} 
-          fileName={`Tear_Sheet_${targetCompany}.pdf`} 
+        <PdfPreviewModal
+          isOpen={isPdfModalOpen}
+          onClose={() => setIsPdfModalOpen(false)}
+          pdfUrl={pdfUrl}
+          fileName={`Tear_Sheet_${targetCompany}.pdf`}
         />
       </motion.div>
     </main>
