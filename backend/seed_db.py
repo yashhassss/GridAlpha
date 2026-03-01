@@ -1,9 +1,15 @@
 from database import SessionLocal, engine, Base, Region, Company, DataCenter
 import random
 
-Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
 db = SessionLocal()
+
+# Idempotency check: don't wipe and seed if data already exists in production
+if db.query(Region).count() > 0:
+    print("Database is already seeded. Skipping initial data injection.")
+    db.close()
+    exit(0)
+
 
 # 1. Authentic Commercial Rates ($/kWh) and IATA City Codes
 regions_data = {

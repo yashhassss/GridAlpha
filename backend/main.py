@@ -6,6 +6,10 @@ import requests
 import time
 
 from fastapi.responses import StreamingResponse
+from fastapi import Request
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 import pandas as pd
 import io
 # --- PDF GENERATION IMPORTS ---
@@ -17,7 +21,14 @@ from reportlab.lib.styles import getSampleStyleSheet
 from database import SessionLocal, DataCenter
 from ml_engine import run_monte_carlo_power_sim
 
+from pydantic import BaseModel, Field, ConfigDict
+
 app = FastAPI()
+
+# Rate Limiter setup
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -33,14 +44,16 @@ def get_db():
     finally: db.close()
 
 class SimulationRequest(BaseModel):
-    target_company: str
-    extra_mw: float
-    hardware_type: str = "H100"
+    model_config = ConfigDict(extra='forbid')
+    target_company: str = Field(..., max_length=100)
+    extra_mw: float = Field(..., ge=0, le=100000)
+    hardware_type: str = Field(default="H100", max_length=50)
 
 class OptimizeRequest(BaseModel):
-    target_company: str
-    requested_mw: float
-    hardware_type: str = "H100"
+    model_config = ConfigDict(extra='forbid')
+    target_company: str = Field(..., max_length=100)
+    requested_mw: float = Field(..., ge=0, le=100000)
+    hardware_type: str = Field(default="H100", max_length=50)
 
 WEATHER_CACHE = {}
 CACHE_TTL = 300 
@@ -111,7 +124,8 @@ def get_live_metrics(location: str, base_pue: float, base_rate: float, hw_pue_pe
     return live_temp_c, live_pue, live_rate, lmp_multiplier > 1.5, blended_daily_rate
 
 @app.get("/api/power-alpha")
-def get_power_data(db: Session = Depends(get_db)):
+@limiter.limit("60/minute")
+def get_power_data(request: Request, db: Session = Depends(get_db)):
     results = db.query(DataCenter).all()
     formatted_data = []
     for dc in results:
@@ -129,7 +143,8 @@ def get_power_data(db: Session = Depends(get_db)):
     return {"status": "success", "data": formatted_data}
 
 @app.post("/api/simulate")
-def simulate_scenario(req: SimulationRequest, db: Session = Depends(get_db)):
+@limiter.limit("15/minute")
+def simulate_scenario(request: Request, req: SimulationRequest, db: Session = Depends(get_db)):
     results = db.query(DataCenter).all()
     
     company_dcs = [dc for dc in results if dc.company.name == req.target_company]
@@ -160,7 +175,8 @@ def simulate_scenario(req: SimulationRequest, db: Session = Depends(get_db)):
     return {"status": "success", "data": formatted_data}
 
 @app.post("/api/optimize")
-def optimize_allocation(req: OptimizeRequest, db: Session = Depends(get_db)):
+@limiter.limit("15/minute")
+def optimize_allocation(request: Request, req: OptimizeRequest, db: Session = Depends(get_db)):
     company_dcs = [dc for dc in db.query(DataCenter).all() if dc.company.name == req.target_company]
     actual_req_mw, test_pue = apply_hardware_physics(req.hardware_type, req.requested_mw, 1.0)
     hw_pue_penalty = test_pue - 1.0
@@ -211,7 +227,8 @@ def optimize_allocation(req: OptimizeRequest, db: Session = Depends(get_db)):
     }
 
 @app.post("/api/report")
-def generate_pdf_report(req: SimulationRequest, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def generate_pdf_report(request: Request, req: SimulationRequest, db: Session = Depends(get_db)):
     results = db.query(DataCenter).all()
     company_dcs = [dc for dc in results if dc.company.name == req.target_company]
     num_dcs = len(company_dcs)
