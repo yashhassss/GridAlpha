@@ -22,32 +22,17 @@ export default function Home() {
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
-  // NEW: State for global loading (Cold Start)
-  const [isBooting, setIsBooting] = useState<boolean>(true);
 
   // NEW: State to control map panning from the ledger
   const [focusLocation, setFocusLocation] = useState<string | null>(null);
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://wutluqusluastfeejceo.supabase.co/functions/v1";
 
   useEffect(() => {
-    const fetchWithRetry = () => {
-      fetch(`${API_BASE}/api/power-alpha`)
-        .then((res) => {
-          if (!res.ok) throw new Error("Backend unavailable");
-          return res.json();
-        })
-        .then((json) => {
-          formatChartData(json.data);
-          setIsBooting(false);
-        })
-        .catch((err) => {
-          console.warn("Backend still booting. Retrying in 5 seconds...");
-          setTimeout(fetchWithRetry, 5000); // Retry every 5 seconds
-        });
-    };
-
-    fetchWithRetry();
+    fetch(`${API_BASE}/power-alpha`)
+      .then((res) => res.json())
+      .then((json) => formatChartData(json.data))
+      .catch((err) => console.error("Failed to fetch data:", err));
   }, []);
 
   const formatChartData = (rawData: any[]) => {
@@ -67,7 +52,7 @@ export default function Home() {
     setOptimizeData(null);
     setFocusLocation(null); // Reset focus on new simulation
 
-    const endpoint = val === 0 ? "/api/power-alpha" : "/api/simulate";
+    const endpoint = val === 0 ? "/power-alpha" : "/simulate";
     const method = val === 0 ? "GET" : "POST";
     const body = val === 0 ? null : JSON.stringify({ target_company: company, extra_mw: val, hardware_type: hwType });
 
@@ -84,7 +69,7 @@ export default function Home() {
     setIsOptimizing(true);
     setFocusLocation(null); // Reset focus so map zooms back out to global view
     try {
-      const res = await fetch(`${API_BASE}/api/optimize`, {
+      const res = await fetch(`${API_BASE}/optimize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ target_company: targetCompany, requested_mw: extraMW, hardware_type: hardware }),
@@ -131,7 +116,7 @@ export default function Home() {
   const handleGenerateTearSheet = async () => {
     setIsGeneratingPdf(true);
     try {
-      const response = await fetch(`${API_BASE}/api/report`, {
+      const response = await fetch(`${API_BASE}/report`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -161,21 +146,12 @@ export default function Home() {
       <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-blue-900/10 blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute bottom-[-20%] right-[-10%] w-[600px] h-[600px] bg-orange-900/5 blur-[120px] rounded-full pointer-events-none" />
 
-      {isBooting && (
-        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-black/80 backdrop-blur-md">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mb-4"></div>
-          <h2 className="text-xl font-bold tracking-widest text-orange-400">CONNECTING TO GRID INFRASTRUCTURE</h2>
-          <p className="text-sm text-gray-400 mt-2 max-w-sm text-center">
-            Initializing neural link to global power endpoints. This may take up to 60 seconds during a cold boot sequence...
-          </p>
-        </div>
-      )}
 
       <motion.div className="max-w-[1800px] mx-auto h-full relative z-10 flex flex-col gap-3" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
 
         <div className="flex-none">
           <Header
-            downloadReport={() => downloadFile("/api/export", `Grid_Stress_${targetCompany}.csv`)}
+            downloadReport={() => downloadFile("/export", `Grid_Stress_${targetCompany}.csv`)}
             downloadPDF={handleGenerateTearSheet}
             totalArbitrage={totalArbitrage}
             gridStatus={gridStatus}
